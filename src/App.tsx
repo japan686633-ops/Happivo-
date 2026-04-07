@@ -1,6 +1,34 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Sparkles, Wand2, BookOpen, ArrowRight, Twitter, Linkedin, Instagram, Facebook, Menu, Plus, X, Phone, Mail, MessageCircle, User, Globe, Send } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { db, auth } from "./firebase";
+import { collection, addDoc, onSnapshot, query, orderBy } from "firebase/firestore";
+import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "firebase/auth";
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  // We don't throw here to avoid crashing the app, but we log it.
+}
 
 const VIDEO_SRC = "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260315_073750_51473149-4350-4920-ae24-c8214286f323.mp4";
 const HERO_FLOWERS = "https://images.unsplash.com/photo-1526047932273-341f2a7631f9?auto=format&fit=crop&q=80&w=800";
@@ -20,52 +48,96 @@ export default function App() {
   
   const plansRef = React.useRef<HTMLDivElement>(null);
 
-  // Load data from localStorage
-  const [clients, setClients] = useState<any[]>(() => {
-    const saved = localStorage.getItem("happivo_clients");
-    return saved ? JSON.parse(saved) : [];
-  });
+  // Load data from Firestore
+  const [clients, setClients] = useState<any[]>([]);
+  const [messages, setMessages] = useState<any[]>([]);
 
-  const [messages, setMessages] = useState<any[]>(() => {
-    const saved = localStorage.getItem("happivo_messages");
-    return saved ? JSON.parse(saved) : [];
-  });
+  useEffect(() => {
+    let unsubscribeClients = () => {};
+    let unsubscribeMessages = () => {};
 
-  const handleLogin = (e: React.FormEvent) => {
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      if (user && user.email === "japan686633@gmail.com") {
+        setIsLoggedIn(true);
+        
+        // Only subscribe to data if logged in as admin
+        unsubscribeClients = onSnapshot(
+          query(collection(db, "clients"), orderBy("date", "desc")),
+          (snapshot) => {
+            const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            setClients(data);
+          },
+          (error) => handleFirestoreError(error, OperationType.LIST, "clients")
+        );
+
+        unsubscribeMessages = onSnapshot(
+          query(collection(db, "messages"), orderBy("date", "desc")),
+          (snapshot) => {
+            const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            setMessages(data);
+          },
+          (error) => handleFirestoreError(error, OperationType.LIST, "messages")
+        );
+      } else {
+        setIsLoggedIn(false);
+        setClients([]);
+        setMessages([]);
+        unsubscribeClients();
+        unsubscribeMessages();
+      }
+    });
+
+    return () => {
+      unsubscribeAuth();
+      unsubscribeClients();
+      unsubscribeMessages();
+    };
+  }, []);
+
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (loginCode === "sora@123#") {
-      setIsLoggedIn(true);
-      setIsLoginModalOpen(false);
-      setLoginCode("");
+      try {
+        const provider = new GoogleAuthProvider();
+        await signInWithPopup(auth, provider);
+        setIsLoginModalOpen(false);
+        setLoginCode("");
+      } catch (error) {
+        alert("Login failed: " + (error as Error).message);
+      }
     } else {
       alert("Invalid secret code");
     }
   };
 
-  const saveClient = (data: any) => {
-    const newClients = [...clients, { ...data, id: Date.now(), date: new Date().toLocaleString() }];
-    setClients(newClients);
-    localStorage.setItem("happivo_clients", JSON.stringify(newClients));
+  const saveClient = async (data: any) => {
+    const clientData = { ...data, date: new Date().toLocaleString() };
+    try {
+      await addDoc(collection(db, "clients"), clientData);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, "clients");
+    }
   };
 
-  const saveMessage = (e: React.FormEvent) => {
+  const saveMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!clientMessage.trim()) return;
     
     const newMessage = {
-      id: Date.now(),
       name: formData.name || "Anonymous",
       contact: formData.phone || formData.email || "No contact info",
       message: clientMessage,
       date: new Date().toLocaleString()
     };
     
-    const newMessages = [...messages, newMessage];
-    setMessages(newMessages);
-    localStorage.setItem("happivo_messages", JSON.stringify(newMessages));
-    setClientMessage("");
-    setIsMessagingOpen(false);
-    alert("Message sent successfully!");
+    try {
+      await addDoc(collection(db, "messages"), newMessage);
+      setClientMessage("");
+      setIsMessagingOpen(false);
+      alert("Message sent successfully!");
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, "messages");
+    }
   };
 
   const togglePlans = (e?: React.MouseEvent) => {
@@ -108,8 +180,9 @@ export default function App() {
 
   const menuOptions = [
     { label: "Plans", icon: <Sparkles size={16} />, onClick: () => togglePlans() },
-    { label: isLoggedIn ? "Logout" : "Sora", icon: <Sparkles size={16} />, onClick: () => {
+    { label: isLoggedIn ? "Logout" : "Sora", icon: <Sparkles size={16} />, onClick: async () => {
       if (isLoggedIn) {
+        await signOut(auth);
         setIsLoggedIn(false);
         setIsDashboardOpen(false);
       } else {
@@ -775,7 +848,7 @@ export default function App() {
                               <span className="text-[10px] text-white/30 font-mono">{client.date}</span>
                             </div>
                           </div>
-                        )).reverse()
+                        ))
                       )}
                     </div>
                   ) : (
@@ -796,7 +869,7 @@ export default function App() {
                               {msg.message}
                             </p>
                           </div>
-                        )).reverse()
+                        ))
                       )}
                     </div>
                   )}
