@@ -396,19 +396,19 @@ export default function App() {
                         {
                           title: "3D Looking Website",
                           desc: "Immersive 3D experience with visionary depth.",
-                          price: "$300",
+                          price: "$2000",
                           level: "Hyper Level"
                         },
                         {
                           title: "Premium 3D Feel",
                           desc: "Premium website or apps with high-end 3D field aesthetics.",
-                          price: "$250",
+                          price: "$1500",
                           level: "Hyper Level"
                         },
                         {
                           title: "Customization",
-                          desc: "Premium website for your customization starting from $200.",
-                          price: "$200+",
+                          desc: "Premium website for your customization starting from $1000.",
+                          price: "$1000",
                           level: "Hyper Level"
                         }
                       ].map((plan, i) => (
